@@ -22,6 +22,14 @@ Loop:
   * autotunning
     - ajusta las constantes del PID mediante saltos de temperatura
 
+  Cómo hacer yogurt:
+    * (opcional) Calentar leche de vaca a 82ºC durante 30' y enfriar
+      rápidamente a 45ºC
+    * Poner el inóculo (2 cucharadas de yogurt o inóculo comprado) a la leche
+      templada (~45ºC)
+    * Seleccionar tiempo y temperatura, y pulsar comenzar
+    * refrigerar los yogures cuando termine el tiempo de fermentación
+
 *********************************************************************/
 
 
@@ -34,25 +42,31 @@ Loop:
 #include <Adafruit_PCD8544.h>
 #include <EEPROMEx.h>
 
-#define DEFAULT_TEMP  37  //ºC
-#define DEFAULT_TIME  10  //horas
+
+//##############################################################################
+//                              C O N S T A N T S
+//##############################################################################
+// firmware version
+#define VERSION     1.0
+
+// PID default settings
+#define DEFAULT_TEMP  42  //Recomendado entre 37 y 46ºC
+#define DEFAULT_TIME  10  //Recomendado entre 5 y 10h
 #define DEFAULT_KP    2
 #define DEFAULT_KI    0.5
 #define DEFAULT_KD    2
 
-
-
-#define VERSION               1.0
-#define TIME_BUTTON_SHORT     500
-#define TIME_BUTTON_LONG      1000
-#define TIME_BUTTON_VERYLONG  8000
+// update time (refresh, read ADC, ...)
 #define TIME_REFRESH_LCD      200
 #define TIME_REFRESH_SERIAL   1000
+#define TIME_UPDATE_PID       50
 
-#define THERMISTORNOMINAL     100000  // resistance at 25 degrees C
-#define TEMPERATURENOMINAL    25      // temp. for nominal resistance (almost always 25 C)
-#define BCOEFFICIENT          3950    // The beta coefficient of the thermistor (usually 3000-4000)
-#define SERIESRESISTOR        98700   // the value of the 'other' resistor
+// thermistor constants
+#define THERMISTORNOMINAL   100000  // resistance at 25 degrees C
+#define TEMPERATURENOMINAL  25      // temp. for nominal resistance (almost always 25 C)
+#define BCOEFFICIENT        3950    // The beta coefficient of the thermistor (usually 3000-4000)
+#define SERIESRESISTOR      98700   // the value of the 'other' resistor
+#define VCC                 5
 
 //pin out
 #define PIN_LCD_RST     3
@@ -60,10 +74,16 @@ Loop:
 #define PIN_LCD_DC      5
 #define PIN_LCD_DIN     6
 #define PIN_LCD_SCLK    7
-#define BUTTON_NEXT     8
-#define BUTTON_OK       9
+#define BUTTON_RIGHT    _LCDML_CONTROL_digital_enter
+#define BUTTON_UP       _LCDML_CONTROL_digital_up
+#define BUTTON_DOWN     _LCDML_CONTROL_digital_down
+#define PIN_PWM         12
 #define PIN_THM         A0
-#define PIN_PWM         11
+
+#define _LCDML_CONTROL_digital_enter           8
+#define _LCDML_CONTROL_digital_up              9
+#define _LCDML_CONTROL_digital_down            10
+#define _LCDML_CONTROL_digital_quit            11
 
 //EEPROM
 #define ADDR_FLOAT_VERSION    0
@@ -71,209 +91,179 @@ Loop:
 #define ADDR_DOUBLE_KI        10
 #define ADDR_DOUBLE_KD        15
 #define ADDR_DOUBLE_SETPOINT  20
-#define ADDR_DOUBLE_TIME      25
-#define ADDR_FLOAT_TEMP       30
+#define ADDR_INT_TIME         25
 
-
-double  input,
-        output,
-        setpoint,
-        kp,
-        ki,
-        kd;
-boolean tuning = false;
-
-unsigned long serialTime,
-              lcdTime,
-              buttonUpTime,
-              buttonDownTime,
-              startTime;
-
-
-Adafruit_PCD8544  display (PIN_LCD_SCLK, PIN_LCD_DIN, PIN_LCD_DC, PIN_LCD_CS, PIN_LCD_RST);
-PID               myPID   (&input, &output, &setpoint, DEFAULT_KP, DEFAULT_KI, DEFAULT_KD, DIRECT);//REVERSE;
-PID_ATune         aTune   (&input, &output);
-RunningMedian     temp    (100);
+// settings for lcd
+#define _LCDML_DISP_cols  20
+#define _LCDML_DISP_rows  4
 
 
 
 
+//##############################################################################
+//                    G L O B A L   V A R I A B L E S
+//##############################################################################
+// PID variables
+double  pidInput, pidOutput, pidSetPoint, pidKp, pidKi, pidKd;
+
+// Fermentation variables
+int timeSet;  //tempSet==pidSetPoint
+unsigned long startTime, endTime;
+
+// Verbose variables
+unsigned long serialTime, lcdTime, pidTime;
+
+Adafruit_PCD8544                display (PIN_LCD_SCLK, PIN_LCD_DIN, PIN_LCD_DC, PIN_LCD_CS, PIN_LCD_RST);
+PID                             myPID   (&pidInput, &pidOutput, &pidSetPoint, DEFAULT_KP, DEFAULT_KI, DEFAULT_KD, DIRECT);//REVERSE;
+PID_ATune                       aTune   (&pidInput, &pidOutput);
+RunningMedian                   temp    (100);
+U8G2_PCD8544_84X48_1_4W_SW_SPI  u8g2    (U8G2_R0, PIN_LCD_SCLK, PIN_LCD_DIN, PIN_LCD_CS, PIN_LCD_DC, PIN_LCD_RST) // The complete list is available here: https://github.com/olikraus/u8g2/wiki/u8g2setupcpp
+
+
+//### Reset function
+void(* resetFunc) (void) = 0; //declare reset function @ address 0
+
+
+//##############################################################################
+//                                   S E T U P
+//##############################################################################
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(115200);
   Serial.println("init...");
 
-  display.begin();
+  u8g2.begin();
+  //display.begin();
 
   // set PIN modes
-  pinMode(BUTTON_NEXT,  INPUT_PULLUP);
-  pinMode(BUTTON_OK,    INPUT_PULLUP);
+  //pinMode(BUTTON_UP,    INPUT_PULLUP);
+  //pinMode(BUTTON_DOWN,  INPUT_PULLUP);
+  //pinMode(BUTTON_LEFT,  INPUT_PULLUP);
+  //pinMode(BUTTON_RIGHT, INPUT_PULLUP);
+  pinMode(PIN_THM,      INPUT);
+  pinMode(PIN_PWM,      OUTPUT);
 
-  // Si la EEPROM tiene una versión compatible, se cargan los valores PID
+  // Si la EEPROM tiene una versión compatible, se cargan los valores
   if (EEPROM.readFloat(ADDR_FLOAT_VERSION) >= VERSION){
     Serial.println("restoring EEPROM values");
-    setpoint = EEPROM.readDouble(ADDR_DOUBLE_SETPOINT);
-    kp       = EEPROM.readDouble(ADDR_DOUBLE_KP);
-    ki       = EEPROM.readDouble(ADDR_DOUBLE_KI);
-    kd       = EEPROM.readDouble(ADDR_DOUBLE_KD);
+    pidKp       = EEPROM.readDouble(ADDR_DOUBLE_KP);
+    pidKi       = EEPROM.readDouble(ADDR_DOUBLE_KI);
+    pidKd       = EEPROM.readDouble(ADDR_DOUBLE_KD);
+    pidSetPoint = EEPROM.readDouble(ADDR_DOUBLE_SETPOINT);
+    timeSet     = EEPROM.readInt(ADDR_INT_TIME)
 
   // si la versión no es compatible, se cargan los valores por defecto
   } else {
     Serial.println("setting default PID values");
-    setpoint = DEFAULT_TEMP;
-    kp       = DEFAULT_KP;
-    ki       = DEFAULT_KI;
-    kd       = DEFAULT_KD;
+    pidKp       = DEFAULT_KP;
+    pidKi       = DEFAULT_KI;
+    pidKd       = DEFAULT_KD;
+    pidSetPoint = DEFAULT_TEMP;
+    timeSet     = DEFAULT_TIME;
   }
 
+  Serial.print("pidSetPoint: ");Serial.print(pidSetPoint);Serial.print(" Kp: ");Serial.print(pidKp);Serial.print(" pidKi: ");Serial.print(pidKi);Serial.print(" Kd: ");Serial.println(pidKd);
 
-//TODO: si están los 2 botones pulsados al iniciarse pasa al modo autotunning
-if ( digitalRead(BUTTON_NEXT)==LOW && digitalRead(BUTTON_OK)==LOW){
-  Serial.println("autotuning...");
-
-  aTune.SetOutputStep(10);
-  aTune.SetControlType(1);  //TODO: CHECK!
-  aTune.SetNoiseBand(0.8);
-  aTune.SetLookbackSec(20);
-
-  tuning = true;
-}
-
-  Serial.print("setpoint: ");Serial.print(setpoint);Serial.print(" Kp: ");Serial.print(kp);Serial.print(" ki: ");Serial.print(ki);Serial.print(" Kd: ");Serial.println(kd);
-
-  myPID.SetTunings(kp,ki,kd);
+  myPID.SetTunings(pidKp,pidKi,pidKd);
   myPID.SetMode(AUTOMATIC);    //set mode automatic (on) manual (off)
 
-  serialTime      = 0;
-  lcdTime         = 0;
-  startTime       = 0;
-  buttonUpTime    = 0;
-  buttonDownTime  = 0;
+
+
+//TODO: mostrar menú para empezar, ajustar valores o iniciar el autotunning
+  /*while(menu){
+    temp.add(analogRead(PIN_THM));    //lee la temperatura mientras se muestra menu
+    LCDML.loop();
+  }*/
+
+  serialTime  = 0;
+  lcdTime     = 0;
+  pidTime     = 0;
+  startTime   = millis();                       //TODO: mover a la función de inicio
+  endTime     = startTime + (timeSet*3600*1000) //TODO: mover a la función de inicio
 }
 
 
 
 
 
-
+//##############################################################################
+//                                   L O O P
+//##############################################################################
 void loop() {
-  //now   = millis();                  //overflows in ~ 50 days!!
+  //lee el termistor
   temp.add(analogRead(PIN_THM));
-  //tempOut = adc2temp(outSensor.getMedian(), SERIAL_RESISTOR_HOT);
 
-  if(tuning){
-    if ( aTune.Runtime() != 0 ){
-      kp = aTune.GetKp();
-      ki = aTune.GetKi();
-      kd = aTune.GetKd();
-      EEPROM.writeDouble(ADDR_DOUBLE_KP, kp);
-      EEPROM.writeDouble(ADDR_DOUBLE_KI, ki);
-      EEPROM.writeDouble(ADDR_DOUBLE_KD, kd);
-      EEPROM.writeFloat(ADDR_FLOAT_VERSION,VERSION);
-      myPID.SetTunings(kp,ki,kd);
-
-      Serial.println("Autotunning terminado")
-      Serial.print(" Kp: "); Serial.print(kp); Serial.print(" ki: "); Serial.print(ki); Serial.print(" Kd: "); Serial.println(kd);
-
-      tuning = false;
-    }
-
-  } else {
-    myPID.Compute();                   //calculate output
+  //calcula pidOutput a partir de pidInput y ajuta PWM en concordancia
+  if(millis() > pidTime){
+      pidInput = adc2temp(temp.getMedian(), VCC, SERIESRESISTOR);
+      myPID.Compute();
+      analogWrite(PIN_PWM, pidOutput);
+      pidTime = millis() + TIME_UPDATE_PID;
   }
-
-  analogWrite(PIN_PWM,output);       //heater control (default PID output range is between 0-255)
-
-  switch(checkButtons()){
-    case UP:
-      setpoint++;
-      EEPROM.writeDouble(ADDR_DOUBLE_SETPOINT, setpoint);
-      break;
-
-    case DOWN:
-      setpoint--;
-      EEPROM.writeDouble(ADDR_DOUBLE_SETPOINT, setpoint);
-      break;
-  }
-
 
   //update LCD if needed
   if(millis() > lcdTime) {
-    if(!tuning){
-      /*//lcd.clear();
-      lcd.home();
-      lcd.print("Temp: "); lcd.print ( input ); lcd.print ( " (" ); lcd.print((int)setpoint); lcd.print ( ") " );
-      lcd.setCursor ( 0, 1 );
-      lcd.print("Vel: "); lcd.print ( map(output,0,255,0,100) ); lcd.print ( "%    " );*/
-
-    } else {
-      lcd.setCursor ( 0, 1 );
-      lcd.print("S"); lcd.print((int)setpoint); lcd.print(" T"); lcd.print ( (int)input ); lcd.print(" V"); lcd.print ( output );//map(output,0,255,0,100) );
-    }
-
-    //serialTime+=500;
     lcdTime = millis() + TIME_REFRESH_LCD;
   }
 
-  //send with processing if it's time
+  // Serial print
   if(millis() > serialTime) {
-    Serial.print("setpoint: ");Serial.print(setpoint); Serial.print(" ");
-    Serial.print("input: ");Serial.print(input); Serial.print(" ");
-    Serial.print("output: ");Serial.println(output);
+    Serial.print("pidSetPoint: ");Serial.print(pidSetPoint); Serial.print(" ");
+    Serial.print("pidInput: ");Serial.print(pidInput); Serial.print(" ");
+    Serial.print("pidOutput: ");Serial.println(pidOutput);
     serialTime = millis() + TIME_REFRESH_SERIAL;
   }
 }
 
 
 
+void autoTune(){
+  Serial.println("autotuning...");
 
+  aTune.SetOutputStep(10);
+  aTune.SetControlType(1);
+  aTune.SetNoiseBand(0.8);
+  aTune.SetLookbackSec(20);
 
-
-byte checkButtons(){
-  if (digitalRead(BUTTON_UP) == LOW) {
-    Serial.println(buttonUpTime);
-    if (buttonUpTime == 0) {
-      Serial.println("Button up");
-      delay(15);
-      buttonUpTime = millis() + TIME_BUTTON_LONG;
-      return UP;
-
-    } else if (millis() > buttonUpTime){
-      Serial.println("Button up");
-      buttonUpTime += TIME_BUTTON_SHORT;
-      return UP;
-    }
-
-  } else {
-    buttonUpTime = 0;
+  while ( aTune.Runtime() == 0 ){
+    analogWrite(PIN_PWM, pidOutput);
   }
 
-  if (digitalRead(BUTTON_DOWN) == LOW) {
-    if (buttonDownTime == 0) {
-      Serial.println("Button down");
-      delay(15);
-      buttonDownTime = millis() + TIME_BUTTON_LONG;
-      return DOWN;
+  pidKp = aTune.GetKp();
+  pidKi = aTune.GetKi();
+  pidKd = aTune.GetKd();
+  EEPROM.writeDouble(ADDR_DOUBLE_KP, pidKp);
+  EEPROM.writeDouble(ADDR_DOUBLE_KI, pidKi);
+  EEPROM.writeDouble(ADDR_DOUBLE_KD, pidKd);
+  EEPROM.writeFloat(ADDR_FLOAT_VERSION,VERSION);
+  myPID.SetTunings(pidKp,pidKi,pidKd);
 
-    } else if (millis() > buttonDownTime){
-      Serial.println("Button down");
-      buttonDownTime += TIME_BUTTON_SHORT;
-      return DOWN;
-    }
+  Serial.println("Autotunning terminado")
+  Serial.print(" Kp: "); Serial.print(pidKp); Serial.print(" pidKi: "); Serial.print(pidKi); Serial.print(" Kd: "); Serial.println(pidKd);
 
-  } else {
-    buttonDownTime = 0;
-  }
-
-  return -1;
+  resetFunc();  //reboot!!
 }
 
 
-double adc2temp(int adc, float sr){
+
+// Función pensada para transformar valores leídos con entrada analógica
+// a ºC.
+//    - adc: valor obtenido con analogRead
+//    - Vin: tensión de alimentación del divisor de tensión
+//    - sr: resistencia serie del divisor de tensión
+//    - vccTherm: thermistor a VCC (true) o a GND (false)
+double adc2temp(int adc, float Vin, float sr){
+  adc2temp(int adc, float Vin, float sr, true);
+}
+double adc2temp(int adc, float Vin, float sr, boolean vccTherm){
   float steinhart, vadc, radc, rinf;
 
   //convert ADC value to resistance
   vadc = Vin * adc/1023.0;
-  radc = sr*vadc/(Vin-vadc);  //sr*(Vin-vadc)/vadc
+  if (vccTherm){
+      radc = sr*vadc/(Vin-vadc);  //sr*(Vin-vadc)/vadc
+  } else {
+      radc = sr*(Vin-vadc)/vadc
+  }
 
   rinf = THERMISTORNOMINAL*exp(-BCOEFFICIENT/TEMPERATURENOMINAL);               //R0*e^(-B/T0)
   steinhart = BCOEFFICIENT/log(radc/rinf);                                      //T = B/log(Rout/Rinf)
