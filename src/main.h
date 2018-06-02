@@ -116,7 +116,7 @@
 
 // menu element count - last element id
 // this value must be the same as the last menu element
-#define _LCDML_DISP_cnt    5
+#define _LCDML_DISP_cnt    8
 
 
 //##############################################################################
@@ -133,6 +133,9 @@ void mDyn_time(uint8_t line);
 void mDyn_temp(uint8_t line);
 void mFunc_start(uint8_t param);
 void mFunc_setPID(uint8_t param);
+void mDyn_Kp(uint8_t line);
+void mDyn_Ki(uint8_t line);
+void mDyn_Kd(uint8_t line);
 
 
 //##############################################################################
@@ -163,7 +166,6 @@ union pidData_t{
 pidData_t pidData;
 
 FERMDATA fermData;
-
 double pidInput, pidOutput;
 
 // Verbose variables

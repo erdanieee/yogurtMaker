@@ -1,6 +1,6 @@
 /*********************************************************************
 Programa para controlar la yogurtera
-El programa, básicamente, mantiene la temperatura constante (aprox. 37ºC)
+El programa, básicamente, mantiene la temperatura constante (aprox. 42ºC)
 durante el tiempo establecido (aprox 10h) mediante un control PID. Para ello,
 utiliza un termistor y una resistencia calefactora. El programa incluye la
 opción de ajustar los parámetros del control de temperatura (PID), la
@@ -24,9 +24,9 @@ Loop:
 
   Cómo hacer yogurt:
     * (opcional) Calentar leche de vaca a 82ºC durante 30' y enfriar
-      rápidamente a 45ºC
+      rápidamente a 42ºC
     * Poner el inóculo (2 cucharadas de yogurt o inóculo comprado) a la leche
-      templada (~45ºC)
+      templada (~42ºC)
     * Seleccionar tiempo y temperatura, y pulsar comenzar
     * refrigerar los yogures cuando termine el tiempo de fermentación
 
@@ -49,9 +49,11 @@ LCDML_add         (0  , LCDML_0       , 1 , "Empezar"            , mFunc_start);
 LCDML_addAdvanced (1  , LCDML_0       , 2 , NULL, "" , mDyn_time, 0, _LCDML_TYPE_dynParam); // LCDMenuLib_add(id, prev_layer,     new_num, condetion,   lang_char_array, callback_function, parameter (0-255), menu function type  )
 LCDML_addAdvanced (2  , LCDML_0       , 3 , NULL, "" , mDyn_temp, 0, _LCDML_TYPE_dynParam); // LCDMenuLib_add(id, prev_layer,     new_num, condetion,   lang_char_array, callback_function, parameter (0-255), menu function type  )
 LCDML_add         (3  , LCDML_0       , 4 , "Ajuste PID"         , NULL); // LCDML_add(id, prev_layer, new_num, lang_char_array, callback_function)
-LCDML_add         (4  , LCDML_0_3     , 1 , "Automático"         , mFunc_setPID); // LCDML_add(id, prev_layer, new_num, lang_char_array, callback_function)
-LCDML_add         (5  , LCDML_0_3     , 2 , "Manual"             , NULL); // LCDML_add(id, prev_layer, new_num, lang_char_array, callback_function)
-
+LCDML_add         (4  , LCDML_0_4     , 1 , "Automático"         , mFunc_setPID); // LCDML_add(id, prev_layer, new_num, lang_char_array, callback_function)
+LCDML_add         (5  , LCDML_0_4     , 2 , "Manual"             , NULL); // LCDML_add(id, prev_layer, new_num, lang_char_array, callback_function)
+LCDML_addAdvanced (6  , LCDML_0_4_2       , 1 , NULL, "" , mDyn_Kp, 0, _LCDML_TYPE_dynParam); // LCDMenuLib_add(id, prev_layer,     new_num, condetion,   lang_char_array, callback_function, parameter (0-255), menu function type  )
+LCDML_addAdvanced (7  , LCDML_0_4_2       , 2 , NULL, "" , mDyn_Ki, 0, _LCDML_TYPE_dynParam); // LCDMenuLib_add(id, prev_layer,     new_num, condetion,   lang_char_array, callback_function, parameter (0-255), menu function type  )
+LCDML_addAdvanced (8  , LCDML_0_4_2       , 3 , NULL, "" , mDyn_Kd, 0, _LCDML_TYPE_dynParam); // LCDMenuLib_add(id, prev_layer,     new_num, condetion,   lang_char_array, callback_function, parameter (0-255), menu function type  )
 LCDML_createMenu(_LCDML_DISP_cnt);
 
 
@@ -437,6 +439,9 @@ void setupLCD() {
     u8g2.drawStr( _LCDML_DISP_box_x0+_LCDML_DISP_font_w + _LCDML_DISP_cur_space_behind,  (_LCDML_DISP_font_h * (1+line)), buf);     // the value can be changed with left or right
   }
 
+
+
+
   /* ===================================================================== *
    *                                                                       *
    * Dynamic content                                                       *
@@ -498,9 +503,159 @@ void setupLCD() {
 
 
 
+  /* ===================================================================== *
+   *                                                                       *
+   * Dynamic content                                                       *
+   *                                                                       *
+   * ===================================================================== *
+   */
+  void mDyn_Kp(uint8_t line) {
+    // check if this function is active (cursor stands on this line)
+    if (line == LCDML.MENU_getCursorPos()) {
+      // make only an action when the cursor stands on this menuitem
+      //check Button
+      if(LCDML.BT_checkAny()) {
+        if(LCDML.BT_checkEnter()) {
+          // this function checks returns the scroll disable status (0 = menu scrolling enabled, 1 = menu scrolling disabled)
+          if(LCDML.MENU_getScrollDisableStatus() == 0) {
+            // disable the menu scroll function to catch the cursor on this point
+            // now it is possible to work with BT_checkUp and BT_checkDown in this function
+            // this function can only be called in a menu, not in a menu function
+            LCDML.MENU_disScroll();
+          }
+
+          else {
+            // enable the normal menu scroll function
+            LCDML.MENU_enScroll();
+          }
+          // dosomething for example save the data or something else
+          LCDML.BT_resetEnter();
+        }
+
+        // This check have only an effekt when MENU_disScroll is set
+        if(LCDML.BT_checkUp()) {
+            pidData.datos.pidKp+=0.1;
+        }
+
+        // This check have only an effekt when MENU_disScroll is set
+        if(LCDML.BT_checkDown()) {
+            pidData.datos.pidKp-=0.1;
+        }
+      }
+    }
+
+    char buf[20];
+    sprintf (buf, "Pid Kp: %d", pidData.datos.pidKp);
+
+    // setup function
+    u8g2.drawStr( _LCDML_DISP_box_x0+_LCDML_DISP_font_w + _LCDML_DISP_cur_space_behind,  (_LCDML_DISP_font_h * (1+line)), buf);     // the value can be changed with left or right
+  }
 
 
 
+
+
+
+    /* ===================================================================== *
+     *                                                                       *
+     * Dynamic content                                                       *
+     *                                                                       *
+     * ===================================================================== *
+     */
+    void mDyn_Ki(uint8_t line) {
+      // check if this function is active (cursor stands on this line)
+      if (line == LCDML.MENU_getCursorPos()) {
+        // make only an action when the cursor stands on this menuitem
+        //check Button
+        if(LCDML.BT_checkAny()) {
+          if(LCDML.BT_checkEnter()) {
+            // this function checks returns the scroll disable status (0 = menu scrolling enabled, 1 = menu scrolling disabled)
+            if(LCDML.MENU_getScrollDisableStatus() == 0) {
+              // disable the menu scroll function to catch the cursor on this point
+              // now it is possible to work with BT_checkUp and BT_checkDown in this function
+              // this function can only be called in a menu, not in a menu function
+              LCDML.MENU_disScroll();
+            }
+
+            else {
+              // enable the normal menu scroll function
+              LCDML.MENU_enScroll();
+            }
+            // dosomething for example save the data or something else
+            LCDML.BT_resetEnter();
+          }
+
+          // This check have only an effekt when MENU_disScroll is set
+          if(LCDML.BT_checkUp()) {
+              pidData.datos.pidKi+=0.1;
+          }
+
+          // This check have only an effekt when MENU_disScroll is set
+          if(LCDML.BT_checkDown()) {
+              pidData.datos.pidKi-=0.1;
+          }
+        }
+      }
+
+      char buf[20];
+      sprintf (buf, "Pid Kp: %d", pidData.datos.pidKi);
+
+      // setup function
+      u8g2.drawStr( _LCDML_DISP_box_x0+_LCDML_DISP_font_w + _LCDML_DISP_cur_space_behind,  (_LCDML_DISP_font_h * (1+line)), buf);     // the value can be changed with left or right
+    }
+
+
+
+
+
+
+      /* ===================================================================== *
+       *                                                                       *
+       * Dynamic content                                                       *
+       *                                                                       *
+       * ===================================================================== *
+       */
+      void mDyn_Kd(uint8_t line) {
+        // check if this function is active (cursor stands on this line)
+        if (line == LCDML.MENU_getCursorPos()) {
+          // make only an action when the cursor stands on this menuitem
+          //check Button
+          if(LCDML.BT_checkAny()) {
+            if(LCDML.BT_checkEnter()) {
+              // this function checks returns the scroll disable status (0 = menu scrolling enabled, 1 = menu scrolling disabled)
+              if(LCDML.MENU_getScrollDisableStatus() == 0) {
+                // disable the menu scroll function to catch the cursor on this point
+                // now it is possible to work with BT_checkUp and BT_checkDown in this function
+                // this function can only be called in a menu, not in a menu function
+                LCDML.MENU_disScroll();
+              }
+
+              else {
+                // enable the normal menu scroll function
+                LCDML.MENU_enScroll();
+              }
+              // dosomething for example save the data or something else
+              LCDML.BT_resetEnter();
+            }
+
+            // This check have only an effekt when MENU_disScroll is set
+            if(LCDML.BT_checkUp()) {
+                pidData.datos.pidKd+=0.1;
+            }
+
+            // This check have only an effekt when MENU_disScroll is set
+            if(LCDML.BT_checkDown()) {
+                pidData.datos.pidKd-=0.1;
+            }
+          }
+        }
+
+        char buf[20];
+        sprintf (buf, "Pid Kp: %d", pidData.datos.pidKd);
+
+        // setup function
+        u8g2.drawStr( _LCDML_DISP_box_x0+_LCDML_DISP_font_w + _LCDML_DISP_cur_space_behind,  (_LCDML_DISP_font_h * (1+line)), buf);     // the value can be changed with left or right
+      }
 
 
 
