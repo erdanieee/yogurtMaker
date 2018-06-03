@@ -31,9 +31,10 @@
 #define DEFAULT_KD    2
 
 // update time (refresh, read ADC, ...)
-#define TIME_REFRESH_LCD      200
-#define TIME_REFRESH_SERIAL   1000
-#define TIME_UPDATE_PID       50
+#define TIME_REFRESH_LCD      50
+#define TIME_REFRESH_SERIAL   5000
+#define TIME_UPDATE_PID       1000
+#define TIME_UPDATE_TEMP      100
 
 // thermistor constants
 #define THERMISTORNOMINAL   100000  // resistance at 25 degrees C
@@ -73,15 +74,15 @@
 #define PIN_LCD_SCLK    7
 
 // configuración de los botones de control
-#define _LCDML_CONTROL_digital_low_active      0    // 0 = high active (pulldown) button, 1 = low active (pullup)
-#define _LCDML_CONTROL_digital_enable_quit     0
-#define _LCDML_CONTROL_digital_enable_lr       0
+#define _LCDML_CONTROL_digital_low_active      0  // 0 = high active (pulldown) button, 1 = low active (pullup)
+#define _LCDML_CONTROL_digital_enable_quit     0  //No se usa botón quit
+#define _LCDML_CONTROL_digital_enable_lr       0  //No se usan boton left right
 #define _LCDML_CONTROL_digital_enter           8
 #define _LCDML_CONTROL_digital_up              9
 #define _LCDML_CONTROL_digital_down            10
-#define _LCDML_CONTROL_digital_quit            11
-#define _LCDML_CONTROL_digital_left            12
-#define _LCDML_CONTROL_digital_right           13
+#define _LCDML_CONTROL_digital_quit            11 //No se usa
+#define _LCDML_CONTROL_digital_left            12 //No se usa
+#define _LCDML_CONTROL_digital_right           13 //No se usa
 
 
 // settings for lcd
@@ -169,7 +170,7 @@ FERMDATA fermData;
 double pidInput, pidOutput;
 
 // Verbose variables
-unsigned long serialTime, lcdTime, pidTime;
+unsigned long serialTime, lcdTime, pidTime, tempTime;
 
 // control del menú
 boolean showMenu;
