@@ -38,24 +38,58 @@ Loop:
 void(* resetFunc) (void) = 0; //declare reset function @ address 0
 
 
-// *********************************************************************
-// LCDML MENU/DISP
-// *********************************************************************
-// LCDML_0        => layer 0
-// LCDML_0_X      => layer 1
-// LCDML_0_X_X    => layer 2
-// LCDML_0_X_X_X  => layer 3
-LCDML_add         (0  , LCDML_0     , 1 , "Empezar"    , mFunc_start); // LCDML_add(id, prev_layer, new_num, lang_char_array, callback_function)
-LCDML_addAdvanced (1  , LCDML_0     , 2 , NULL, ""     , mDyn_time     , 0 , _LCDML_TYPE_dynParam); // LCDMenuLib_add(id, prev_layer,     new_num, condetion,   lang_char_array, callback_function, parameter (0-255), menu function type  )
-LCDML_addAdvanced (2  , LCDML_0     , 3 , NULL, ""     , mDyn_temp     , 0 , _LCDML_TYPE_dynParam); // LCDMenuLib_add(id, prev_layer,     new_num, condetion,   lang_char_array, callback_function, parameter (0-255), menu function type  )
-LCDML_add         (3  , LCDML_0     , 4 , "Ajuste PID" , NULL); // LCDML_add(id, prev_layer, new_num, lang_char_array, callback_function)
-LCDML_add         (4  , LCDML_0_4   , 1 , "Automático" , mFunc_setPID); // LCDML_add(id, prev_layer, new_num, lang_char_array, callback_function)
-LCDML_add         (5  , LCDML_0_4   , 2 , "Manual"     , NULL); // LCDML_add(id, prev_layer, new_num, lang_char_array, callback_function)
-LCDML_addAdvanced (6  , LCDML_0_4_2 , 1 , NULL, ""     , mDyn_Kp       , 0 , _LCDML_TYPE_dynParam); // LCDMenuLib_add(id, prev_layer,     new_num, condetion,   lang_char_array, callback_function, parameter (0-255), menu function type  )
-LCDML_addAdvanced (7  , LCDML_0_4_2 , 2 , NULL, ""     , mDyn_Ki       , 0 , _LCDML_TYPE_dynParam); // LCDMenuLib_add(id, prev_layer,     new_num, condetion,   lang_char_array, callback_function, parameter (0-255), menu function type  )
-LCDML_addAdvanced (8  , LCDML_0_4_2 , 3 , NULL, ""     , mDyn_Kd       , 0 , _LCDML_TYPE_dynParam); // LCDMenuLib_add(id, prev_layer,     new_num, condetion,   lang_char_array, callback_function, parameter (0-255), menu function type  )
-LCDML_createMenu(_LCDML_DISP_cnt);
 
+//##############################################################################
+//                            C L A S E S
+//##############################################################################
+class MyRenderer : public MenuComponentRenderer {
+public:
+    void render(Menu const& menu) const {
+      lcd.clearDisplay();
+      lcd.setCursor(0, 0);
+      lcd.setTextSize(1);
+
+      for (int i = 0; i < menu.get_num_components(); ++i) {
+        MenuComponent const* cp_m_comp = menu.get_menu_component(i);
+
+        if (cp_m_comp->is_current()){
+          lcd.setTextColor(WHITE, BLACK);
+
+        } else {
+          lcd.setTextColor(BLACK);
+        }
+
+        cp_m_comp->render(*this);
+        lcd.println();
+      }
+      lcd.display();
+    }
+
+    void render_menu_item(MenuItem const& menu_item) const {
+        lcd.print(menu_item.get_name());
+    }
+
+    void render_back_menu_item(BackMenuItem const& menu_item) const {
+        lcd.print(menu_item.get_name());
+    }
+
+    void render_numeric_menu_item(NumericMenuItem const& menu_item) const {
+        lcd.print(menu_item.get_name());
+        lcd.print(": ");
+        lcd.print(menu_item.get_value(), 0);
+    }
+
+    void render_menu(Menu const& menu) const {
+        lcd.println(menu.get_name());
+    }
+};
+
+MyRenderer my_renderer;
+MenuSystem      ms (my_renderer);
+MenuItem        mm_mi1("Empezar"      , &on_start_selected);
+NumericMenuItem mm_mi2("Tiempo"       , &on_setTime_selected, DEFAULT_TIME, 1, 24, 1);
+NumericMenuItem mm_mi3("Temperatura"  , &on_setTemp_selected, DEFAULT_TEMP, 20, 50, 1);
+MenuItem        mm_mi4("Ajuste PID"   , &on_autoPID_selected);
 
 
 
@@ -68,15 +102,13 @@ void setup() {
   Serial.begin(115200);
   Serial.println("init...");
 
-  setupLCD(); //TODO: meter en esta función toda la configuración de la pantalla
-  //u8g2.begin();
-  //display.begin();
+  lcd.begin();
+  lcd.setContrast(60);
+  lcd.clearDisplay();
 
   // set PIN modes
-  //pinMode(BUTTON_UP,    INPUT_PULLUP);
-  //pinMode(BUTTON_DOWN,  INPUT_PULLUP);
-  //pinMode(BUTTON_LEFT,  INPUT_PULLUP);
-  //pinMode(BUTTON_RIGHT, INPUT_PULLUP);
+  pinMode(BUTTON_ENTER, INPUT_PULLUP);
+  pinMode(BUTTON_DOWN,  INPUT_PULLUP);
   pinMode(PIN_THM,      INPUT);
   pinMode(PIN_PWM,      OUTPUT);
 
@@ -102,18 +134,17 @@ void setup() {
   myPID.SetTunings(pidData.datos.pidKp,pidData.datos.pidKi,pidData.datos.pidKd);
   myPID.SetMode(AUTOMATIC);    //set mode automatic (on) manual (off)
 
+  //construye menu
+  ms.get_root_menu().add_item(&mm_mi1);
+  ms.get_root_menu().add_item(&mm_mi2);
+  ms.get_root_menu().add_item(&mm_mi3);
+  ms.get_root_menu().add_item(&mm_mi4);
 
-showMenu=true;
-//TODO: mostrar menú para empezar, ajustar valores o iniciar el autotunning
-  while(showMenu){
-    temp.add(analogRead(PIN_THM));    //lee la temperatura mientras se muestra menu
-    LCDML.loop();
-  }
-
-  serialTime  = 0;
-  lcdTime     = 0;
-  pidTime     = 0;
+  showMenu    = true;
   tempTime    = 0;
+  lcdTime     = 0;
+  serialTime  = 0;
+  pidTime     = 0;
 }
 
 
@@ -131,7 +162,7 @@ void loop() {
   }
 
   //calcula pidOutput a partir de pidInput y ajuta PWM en concordancia
-  if(millis() > pidTime){
+  if(!showMenu && millis() > pidTime){
       pidInput = adc2temp(temp.getMedian(), VCC, SERIESRESISTOR);
       myPID.Compute();
       analogWrite(PIN_PWM, pidOutput);
@@ -140,7 +171,31 @@ void loop() {
 
   //update LCD if needed
   if(millis() > lcdTime) {
-    //TODO: imprimir tiempo restante y temperatura actual
+    if(showMenu){
+      ms.display();
+
+    } else{
+      lcd.setTextSize(2);
+      lcd.setCursor(0, 0);
+      lcd.print("Temp: ");
+      lcd.println(pidInput, 2);
+
+      lcd.print("Tiempo: ");
+      unsigned long t = (fermData.endTime - millis())/1000;
+      int h,m,s;
+      h = floor(t/3600);
+      m = floor((t - h * 3600) / 60);
+      s = floor(t - (h * 3600 + m * 60));
+
+      lcd.print(h);
+      lcd.print(":");
+      lcd.print(m);
+      lcd.print(":");
+      lcd.print(s);
+
+      lcd.display();
+    }
+
     lcdTime = millis() + TIME_REFRESH_LCD;
   }
 
@@ -150,6 +205,27 @@ void loop() {
     Serial.print("pidInput: ");Serial.print(pidInput); Serial.print(" ");
     Serial.print("pidOutput: ");Serial.println(pidOutput);
     serialTime = millis() + TIME_REFRESH_SERIAL;
+  }
+
+  if(millis() > fermData.endTime){
+    Serial.print("Fermentación terminada!");
+    showMenu = true;
+    analogWrite(PIN_PWM, 0);
+
+    while (!showMenu) {
+      if(millis() > lcdTime) {
+        lcd.setCursor(0, 0);
+        lcd.setTextSize(3);
+        lcd.print("END");
+        lcd.display();
+        lcdTime = millis() + TIME_REFRESH_LCD;
+      }
+
+      if (digitalRead(BUTTON_ENTER)==LOW || digitalRead(BUTTON_DOWN)==LOW){
+        showMenu = true;
+        delay(100);
+      }
+    }
   }
 }
 
@@ -186,572 +262,81 @@ double adc2temp(int adc, float Vin, float sr, boolean vccTherm){
 
 
 
-
-void setupLCD() {
-    // create menu
-  LCDML_setup(_LCDML_DISP_cnt);
+void on_start_selected(MenuItem* p_menu_component){
+  fermData.startTime = millis();
+  fermData.endTime   = fermData.startTime + (fermData.timeSet*3600*1000);
+  showMenu=false;
+  //TODO: grabar en eeprom si ha habido modificación de parámetros
 }
 
-
-
-
-
-// *********************************************************************
-void lcdml_menu_control(void){
-  // If something must init, put in in the setup condition
-  if(LCDML.BT_setup()) {
-    // runs only once
-    // init buttons
-    pinMode(_LCDML_CONTROL_digital_enter      , INPUT_PULLUP);
-    pinMode(_LCDML_CONTROL_digital_up         , INPUT_PULLUP);
-    pinMode(_LCDML_CONTROL_digital_down       , INPUT_PULLUP);
-    # if(_LCDML_CONTROL_digital_enable_quit == 1)
-      pinMode(_LCDML_CONTROL_digital_quit     , INPUT_PULLUP);
-    # endif
-    # if(_LCDML_CONTROL_digital_enable_lr == 1)
-      pinMode(_LCDML_CONTROL_digital_left     , INPUT_PULLUP);
-      pinMode(_LCDML_CONTROL_digital_right    , INPUT_PULLUP);
-    # endif
-  }
-
-  #if(_LCDML_CONTROL_digital_low_active == 1)
-  #  define _LCDML_CONTROL_digital_a !
-  #else
-  #  define _LCDML_CONTROL_digital_a
-  #endif
-
-  uint8_t but_stat = 0x00;
-
-  bitWrite(but_stat, 0, _LCDML_CONTROL_digital_a(digitalRead(_LCDML_CONTROL_digital_enter)));
-  bitWrite(but_stat, 1, _LCDML_CONTROL_digital_a(digitalRead(_LCDML_CONTROL_digital_up)));
-  bitWrite(but_stat, 2, _LCDML_CONTROL_digital_a(digitalRead(_LCDML_CONTROL_digital_down)));
-  #if(_LCDML_CONTROL_digital_enable_quit == 1)
-  bitWrite(but_stat, 3, _LCDML_CONTROL_digital_a(digitalRead(_LCDML_CONTROL_digital_quit)));
-  #endif
-  #if(_LCDML_CONTROL_digital_enable_lr == 1)
-  bitWrite(but_stat, 4, _LCDML_CONTROL_digital_a(digitalRead(_LCDML_CONTROL_digital_left)));
-  bitWrite(but_stat, 5, _LCDML_CONTROL_digital_a(digitalRead(_LCDML_CONTROL_digital_right)));
-  #endif
-
-  if (but_stat > 0) {
-    if((millis() - g_LCDML_DISP_press_time) >= 200) {
-      g_LCDML_DISP_press_time = millis(); // reset press time
-
-      if (bitRead(but_stat, 0)) { LCDML.BT_enter(); }
-      if (bitRead(but_stat, 1)) { LCDML.BT_up();    }
-      if (bitRead(but_stat, 2)) { LCDML.BT_down();  }
-      if (bitRead(but_stat, 3)) { LCDML.BT_quit();  }
-      if (bitRead(but_stat, 4)) { LCDML.BT_left();  }
-      if (bitRead(but_stat, 5)) { LCDML.BT_right(); }
-    }
-  }
+void on_setTime_selected(NumericMenuItem* p_menu_component){
+  fermData.timeSet = p_menu_component->get_value();
+  Serial.print("timeSet: ");Serial.println(fermData.timeSet);
 }
 
-
-
-
-
-
-/* ******************************************************************** */
-void lcdml_menu_clear()
-/* ******************************************************************** */
-{
+void on_setTemp_selected(NumericMenuItem* p_menu_component){
+  pidData.datos.pidSetPoint = p_menu_component->get_value();
+  Serial.print("pidSetPoint: ");Serial.print(pidData.datos.pidSetPoint); Serial.println(" ");
 }
 
-/* ******************************************************************** */
-void lcdml_menu_display()
-/* ******************************************************************** */
-{
-  // for first test set font here
-  u8g2.setFont(_LCDML_DISP_font);
+void on_autoPID_selected(MenuItem* p_menu_component){
+  Serial.println("autotuning...");
 
-  // declaration of some variables
-  // ***************
-  // content variable
-  char content_text[_LCDML_DISP_cols];  // save the content text of every menu element
-  // menu element object
-  LCDMenuLib2_menu *tmp;
-  // some limit values
-  uint8_t i = LCDML.MENU_getScroll();
-  uint8_t maxi = _LCDML_DISP_rows + i;
-  uint8_t n = 0;
+  aTune.SetOutputStep(10);
+  aTune.SetControlType(1);
+  aTune.SetNoiseBand(0.8);
+  aTune.SetLookbackSec(20);
 
-   // init vars
-  uint8_t n_max             = (LCDML.MENU_getChilds() >= _LCDML_DISP_rows) ? _LCDML_DISP_rows : (LCDML.MENU_getChilds());
-
-  uint8_t scrollbar_min     = 0;
-  uint8_t scrollbar_max     = LCDML.MENU_getChilds();
-  uint8_t scrollbar_cur_pos = LCDML.MENU_getCursorPosAbs();
-  uint8_t scroll_pos        = ((1.*n_max * _LCDML_DISP_rows) / (scrollbar_max - 1) * scrollbar_cur_pos);
-
-  // generate content
-  u8g2.firstPage();
-  do {
-    n = 0;
-    i = LCDML.MENU_getScroll();
-    // update content
-    // ***************
-
-      // clear menu
-      // ***************
-
-    // check if this element has children
-    if (tmp = LCDML.MENU_getObj()->getChild(LCDML.MENU_getScroll())) {
-      // loop to display lines
-      do {
-        // check if a menu element has a condetion and if the condetion be true
-        if (tmp->checkCondetion()) {
-          // check the type off a menu element
-          if(tmp->checkType_menu() == true) {
-            // display normal content
-            LCDML_getContent(content_text, tmp->getID());
-            u8g2.drawStr( _LCDML_DISP_box_x0+_LCDML_DISP_font_w + _LCDML_DISP_cur_space_behind, _LCDML_DISP_box_y0 + _LCDML_DISP_font_h * (n + 1), content_text);
-          }
-          else {
-            if(tmp->checkType_dynParam()) {
-              tmp->callback(n);
-            }
-          }
-          // increment some values
-          i++;
-          n++;
-        }
-      // try to go to the next sibling and check the number of displayed rows
-      } while (((tmp = tmp->getSibling(1)) != NULL) && (i < maxi));
+  //lee el termistor
+  tempTime  = 0;
+  lcdTime   = 0;
+  pidTime   = 0;
+  while(aTune.Runtime() == 0){
+    if(millis() > tempTime){
+      temp.add(analogRead(PIN_THM));
+      tempTime = millis() + TIME_UPDATE_TEMP;
     }
 
-    // set cursor
-    u8g2.drawStr( _LCDML_DISP_box_x0+_LCDML_DISP_cur_space_before, _LCDML_DISP_box_y0 + _LCDML_DISP_font_h * (LCDML.MENU_getCursorPos() + 1),  _LCDML_DISP_cursor_char);
+    if(millis() > lcdTime) {
+      lcd.setCursor(0,0);
 
-    if(_LCDML_DISP_draw_frame == 1) {
-       u8g2.drawFrame(_LCDML_DISP_box_x0, _LCDML_DISP_box_y0, (_LCDML_DISP_box_x1-_LCDML_DISP_box_x0), (_LCDML_DISP_box_y1-_LCDML_DISP_box_y0));
-    }
-
-    // display scrollbar when more content as rows available and with > 2
-    if (scrollbar_max > n_max && _LCDML_DISP_scrollbar_w > 2) {
-      // set frame for scrollbar
-      u8g2.drawFrame(_LCDML_DISP_box_x1 - _LCDML_DISP_scrollbar_w, _LCDML_DISP_box_y0, _LCDML_DISP_scrollbar_w, _LCDML_DISP_box_y1-_LCDML_DISP_box_y0);
-
-      // calculate scrollbar length
-      uint8_t scrollbar_block_length = scrollbar_max - n_max;
-      scrollbar_block_length = (_LCDML_DISP_box_y1-_LCDML_DISP_box_y0) / (scrollbar_block_length + _LCDML_DISP_rows);
-
-      //set scrollbar
-      if (scrollbar_cur_pos == 0) {                                   // top position     (min)
-        u8g2.drawBox(_LCDML_DISP_box_x1 - (_LCDML_DISP_scrollbar_w-1), _LCDML_DISP_box_y0 + 1                                                     , (_LCDML_DISP_scrollbar_w-2)  , scrollbar_block_length);
-      }
-      else if (scrollbar_cur_pos == (scrollbar_max-1)) {            // bottom position  (max)
-        u8g2.drawBox(_LCDML_DISP_box_x1 - (_LCDML_DISP_scrollbar_w-1), _LCDML_DISP_box_y1 - scrollbar_block_length                                , (_LCDML_DISP_scrollbar_w-2)  , scrollbar_block_length);
-      }
-      else {                                                                // between top and bottom
-        u8g2.drawBox(_LCDML_DISP_box_x1 - (_LCDML_DISP_scrollbar_w-1), _LCDML_DISP_box_y0 + (scrollbar_block_length * scrollbar_cur_pos + 1),(_LCDML_DISP_scrollbar_w-2)  , scrollbar_block_length);
-      }
-    }
-  } while ( u8g2.nextPage() );
-}
-
-
-
-
-
-
-
-/* ===================================================================== *
- *                                                                       *
- * Dynamic content                                                       *
- *                                                                       *
- * ===================================================================== *
- */
-void mDyn_time(uint8_t line) {
-  // check if this function is active (cursor stands on this line)
-  if (line == LCDML.MENU_getCursorPos()) {
-    // make only an action when the cursor stands on this menuitem
-    //check Button
-    if(LCDML.BT_checkAny()) {
-      if(LCDML.BT_checkEnter()) {
-        // this function checks returns the scroll disable status (0 = menu scrolling enabled, 1 = menu scrolling disabled)
-        if(LCDML.MENU_getScrollDisableStatus() == 0) {
-          // disable the menu scroll function to catch the cursor on this point
-          // now it is possible to work with BT_checkUp and BT_checkDown in this function
-          // this function can only be called in a menu, not in a menu function
-          LCDML.MENU_disScroll();
-        }
-
-        else {
-          // enable the normal menu scroll function
-          LCDML.MENU_enScroll();
-        }
-        // dosomething for example save the data or something else
-        LCDML.BT_resetEnter();
-      }
-
-      // This check have only an effekt when MENU_disScroll is set
-      if(LCDML.BT_checkUp()) {
-        if (fermData.timeSet <24){
-            fermData.timeSet++;
-
-        } else {
-          fermData.timeSet = 0;
-        }
-      }
-
-      // This check have only an effekt when MENU_disScroll is set
-      if(LCDML.BT_checkDown()) {
-        if (fermData.timeSet >0){
-          fermData.timeSet--;
-
-        } else{
-          fermData.timeSet=24;
-        }
-      }
-    }
-  }
-
-  char buf[20];
-  sprintf (buf, "Tiempo: %d h", fermData.timeSet);
-
-  // setup function
-  u8g2.drawStr( _LCDML_DISP_box_x0+_LCDML_DISP_font_w + _LCDML_DISP_cur_space_behind,  (_LCDML_DISP_font_h * (1+line)), buf);
-}
-
-
-
-
-/* ===================================================================== *
- *                                                                       *
- * Dynamic content                                                       *
- *                                                                       *
- * ===================================================================== *
- */
-void mDyn_temp(uint8_t line) {
-  // check if this function is active (cursor stands on this line)
-  if (line == LCDML.MENU_getCursorPos()) {
-    // make only an action when the cursor stands on this menuitem
-    //check Button
-    if(LCDML.BT_checkAny()) {
-      if(LCDML.BT_checkEnter()) {
-        // this function checks returns the scroll disable status (0 = menu scrolling enabled, 1 = menu scrolling disabled)
-        if(LCDML.MENU_getScrollDisableStatus() == 0) {
-          // disable the menu scroll function to catch the cursor on this point
-          // now it is possible to work with BT_checkUp and BT_checkDown in this function
-          // this function can only be called in a menu, not in a menu function
-          LCDML.MENU_disScroll();
-        }
-
-        else {
-          // enable the normal menu scroll function
-          LCDML.MENU_enScroll();
-        }
-        // dosomething for example save the data or something else
-        LCDML.BT_resetEnter();
-      }
-
-      // This check have only an effekt when MENU_disScroll is set
-      if(LCDML.BT_checkUp()) {
-        if (pidData.datos.pidSetPoint<60){
-          pidData.datos.pidSetPoint++;
-
-        } else {
-          pidData.datos.pidSetPoint=20;
-        }
-      }
-
-      // This check have only an effekt when MENU_disScroll is set
-      if(LCDML.BT_checkDown()) {
-        if (pidData.datos.pidSetPoint>20){
-          pidData.datos.pidSetPoint--;
-
-        } else {
-          pidData.datos.pidSetPoint=60;
-        }
-      }
-    }
-  }
-
-  char buf[20];
-  sprintf (buf, "Temperatura: %2.1f C", pidData.datos.pidSetPoint);
-
-  // setup function
-  u8g2.drawStr( _LCDML_DISP_box_x0+_LCDML_DISP_font_w + _LCDML_DISP_cur_space_behind,  (_LCDML_DISP_font_h * (1+line)), buf);     // the value can be changed with left or right
-}
-
-
-
-
-/* ===================================================================== *
- *                                                                       *
- * Dynamic content                                                       *
- *                                                                       *
- * ===================================================================== *
- */
-void mDyn_Kp(uint8_t line) {
-  // check if this function is active (cursor stands on this line)
-  if (line == LCDML.MENU_getCursorPos()) {
-    // make only an action when the cursor stands on this menuitem
-    //check Button
-    if(LCDML.BT_checkAny()) {
-      if(LCDML.BT_checkEnter()) {
-        // this function checks returns the scroll disable status (0 = menu scrolling enabled, 1 = menu scrolling disabled)
-        if(LCDML.MENU_getScrollDisableStatus() == 0) {
-          // disable the menu scroll function to catch the cursor on this point
-          // now it is possible to work with BT_checkUp and BT_checkDown in this function
-          // this function can only be called in a menu, not in a menu function
-          LCDML.MENU_disScroll();
-        }
-
-        else {
-          // enable the normal menu scroll function
-          LCDML.MENU_enScroll();
-        }
-        // dosomething for example save the data or something else
-        LCDML.BT_resetEnter();
-      }
-
-      // This check have only an effekt when MENU_disScroll is set
-      if(LCDML.BT_checkUp()) {
-          pidData.datos.pidKp+=0.1;
-      }
-
-      // This check have only an effekt when MENU_disScroll is set
-      if(LCDML.BT_checkDown()) {
-          pidData.datos.pidKp-=0.1;
-      }
-    }
-  }
-
-  char buf[20];
-  sprintf (buf, "Pid Kp: %2.1f", pidData.datos.pidKp);
-
-  // setup function
-  u8g2.drawStr( _LCDML_DISP_box_x0+_LCDML_DISP_font_w + _LCDML_DISP_cur_space_behind,  (_LCDML_DISP_font_h * (1+line)), buf);     // the value can be changed with left or right
-}
-
-
-
-
-
-
-/* ===================================================================== *
- *                                                                       *
- * Dynamic content                                                       *
- *                                                                       *
- * ===================================================================== *
- */
-void mDyn_Ki(uint8_t line) {
-  // check if this function is active (cursor stands on this line)
-  if (line == LCDML.MENU_getCursorPos()) {
-    // make only an action when the cursor stands on this menuitem
-    //check Button
-    if(LCDML.BT_checkAny()) {
-      if(LCDML.BT_checkEnter()) {
-        // this function checks returns the scroll disable status (0 = menu scrolling enabled, 1 = menu scrolling disabled)
-        if(LCDML.MENU_getScrollDisableStatus() == 0) {
-          // disable the menu scroll function to catch the cursor on this point
-          // now it is possible to work with BT_checkUp and BT_checkDown in this function
-          // this function can only be called in a menu, not in a menu function
-          LCDML.MENU_disScroll();
-        }
-
-        else {
-          // enable the normal menu scroll function
-          LCDML.MENU_enScroll();
-        }
-        // dosomething for example save the data or something else
-        LCDML.BT_resetEnter();
-      }
-
-      // This check have only an effekt when MENU_disScroll is set
-      if(LCDML.BT_checkUp()) {
-          pidData.datos.pidKi+=0.1;
-      }
-
-      // This check have only an effekt when MENU_disScroll is set
-      if(LCDML.BT_checkDown()) {
-          pidData.datos.pidKi-=0.1;
-      }
-    }
-  }
-
-  char buf[20];
-  sprintf (buf, "Pid Ki: %2.1f", pidData.datos.pidKi);
-
-  // setup function
-  u8g2.drawStr( _LCDML_DISP_box_x0+_LCDML_DISP_font_w + _LCDML_DISP_cur_space_behind,  (_LCDML_DISP_font_h * (1+line)), buf);     // the value can be changed with left or right
-}
-
-
-
-
-
-
-/* ===================================================================== *
- *                                                                       *
- * Dynamic content                                                       *
- *                                                                       *
- * ===================================================================== *
- */
-void mDyn_Kd(uint8_t line) {
-  // check if this function is active (cursor stands on this line)
-  if (line == LCDML.MENU_getCursorPos()) {
-    // make only an action when the cursor stands on this menuitem
-    //check Button
-    if(LCDML.BT_checkAny()) {
-      if(LCDML.BT_checkEnter()) {
-        if(LCDML.MENU_getScrollDisableStatus() == 0) {
-          LCDML.MENU_disScroll();
-
-        } else {
-          LCDML.MENU_enScroll();
-        }
-
-        LCDML.BT_resetEnter();
-      }
-
-      // This check have only an effekt when MENU_disScroll is set
-      if(LCDML.BT_checkUp()) {
-          pidData.datos.pidKd+=0.1;
-      }
-
-      // This check have only an effekt when MENU_disScroll is set
-      if(LCDML.BT_checkDown()) {
-          pidData.datos.pidKd-=0.1;
-      }
-    }
-  }
-
-  char buf[20];
-  sprintf (buf, "Pid Kd: %2.1f", pidData.datos.pidKd);
-
-  // setup function
-  u8g2.drawStr( _LCDML_DISP_box_x0+_LCDML_DISP_font_w + _LCDML_DISP_cur_space_behind,  (_LCDML_DISP_font_h * (1+line)), buf);     // the value can be changed with left or right
-}
-
-
-
-
-
-
-
-
-
-/* ===================================================================== *
- *                                                                       *
- * Menu Callback Function                                                *
- *                                                                       *
- * ===================================================================== *
- */
-void mFunc_start(uint8_t param) {
-  if(LCDML.FUNC_setup())          // ****** SETUP *********
-  {
-    char buf[20];
-
-    u8g2.setFont(_LCDML_DISP_font);
-    u8g2.firstPage();
-    do {
-      u8g2.drawStr( 0, (_LCDML_DISP_font_h * 1), "Enter para empezar");
-      sprintf (buf, "tiempo: %d h", fermData.timeSet);
-      u8g2.drawStr( 0, (_LCDML_DISP_font_h * 2), buf);
-      sprintf (buf, "temperatura: %2.1f C", pidData.datos.pidSetPoint);
-      u8g2.drawStr( 0, (_LCDML_DISP_font_h * 3), buf);
-    } while( u8g2.nextPage() );
-  }
-
-  if(LCDML.FUNC_loop()) {          // ****** LOOP *********
-    if (LCDML.BT_checkAny()) {
-      //TODO: es posible que haga falta copiar aquí la parte del setup
-      if (LCDML.BT_checkEnter()) {
-          LCDML.FUNC_close();
-
-      } else {
-        LCDML.BT_resetAll();
-        LCDML.FUNC_goBackToMenu();
-      }
-    }
-  }
-
-  if(LCDML.FUNC_close()) {    // ****** STABLE END *********
-    fermData.startTime = millis();
-    fermData.endTime   = fermData.startTime + (fermData.timeSet*3600*1000);
-    showMenu=false;
-  }
-}
-
-
-
-
-/* ===================================================================== *
- *                                                                       *
- * Menu Callback Function                                                *
- *                                                                       *
- * ===================================================================== *
- */
-void mFunc_setPID(uint8_t param) {    //FIXME: TODOOOOOOOOOOOOOOOOOOO!!!!!!!!!!!!!!!!!!!!
-  if(LCDML.FUNC_setup())          // ****** SETUP *********
-  {
-    Serial.println("autotuning...");
-
-    aTune.SetOutputStep(10);
-    aTune.SetControlType(1);
-    aTune.SetNoiseBand(0.8);
-    aTune.SetLookbackSec(20);
-
-    LCDML.FUNC_setLoopInterval(100);
-    //LCDML.TIMER_msReset(g_timer_1);
-  }
-
-  //TODO: escribir LCD
-  if(LCDML.FUNC_loop()) {          // ****** LOOP *********
-    temp.add(analogRead(PIN_THM));
-
-    char buf[20];
-
-    u8g2.setFont(_LCDML_DISP_font);
-    u8g2.firstPage();
-    do {
+      char buf[20];
       sprintf (buf, "Kp: %2.1f", pidData.datos.pidKp);
-      u8g2.drawStr( 0, (_LCDML_DISP_font_h * 1), buf);
+      lcd.println(buf);
 
       sprintf (buf, "Ki: %2.1f", pidData.datos.pidKi);
-      u8g2.drawStr( 0, (_LCDML_DISP_font_h * 2), buf);
+      lcd.println(buf);
 
       sprintf (buf, "Kd: %2.1f", pidData.datos.pidKd);
-      u8g2.drawStr( 0, (_LCDML_DISP_font_h * 3), buf);
+      lcd.println(buf);
 
       sprintf (buf, "Set: %2.1f", pidData.datos.pidSetPoint);
-      u8g2.drawStr( 0, (_LCDML_DISP_font_h * 4), buf);
+      lcd.println(buf);
 
       sprintf (buf, "Temp: %2.1f",  adc2temp(temp.getMedian(), VCC, SERIESRESISTOR));
-      u8g2.drawStr( 0, (_LCDML_DISP_font_h * 5), buf);
-    } while( u8g2.nextPage() );
+      lcd.println(buf);
 
-    if (LCDML.BT_checkAny()) {
-      if (LCDML.BT_checkEnter()) {
-          LCDML.FUNC_goBackToMenu();
-      }
+      lcdTime = millis() + TIME_REFRESH_LCD;
+    }
 
-    } else {
-        if (aTune.Runtime() == 0){
-            analogWrite(PIN_PWM, pidOutput);
-
-        } else {
-            LCDML.FUNC_close();
-        }
+    if(millis() > pidTime){
+        pidInput = adc2temp(temp.getMedian(), VCC, SERIESRESISTOR);
+        analogWrite(PIN_PWM, pidOutput);
+        pidTime = millis() + TIME_UPDATE_PID;
     }
   }
 
-  if(LCDML.FUNC_close()) {    // ****** STABLE END *********
-    pidData.datos.pidKp = aTune.GetKp();
-    pidData.datos.pidKi = aTune.GetKi();
-    pidData.datos.pidKd = aTune.GetKd();
-    for( unsigned int i=0 ; i<sizeof(PIDDATA) ; i++  ) {
-      EEPROM.write( ADDR_PID_DATA+i , pidData.b[i] );
-    }
-    EEPROM.write(ADDR_FIRM_VERSION, FIRM_VERSION);
-    myPID.SetTunings(pidData.datos.pidKp,pidData.datos.pidKi,pidData.datos.pidKd);
-
-    Serial.println("Autotunning terminado");
-    Serial.print(" Kp: "); Serial.print(pidData.datos.pidKp); Serial.print(" pidKi: "); Serial.print(pidData.datos.pidKi); Serial.print(" Kd: "); Serial.println(pidData.datos.pidKd);
-
-    resetFunc();  //reboot!!
+  pidData.datos.pidKp = aTune.GetKp();
+  pidData.datos.pidKi = aTune.GetKi();
+  pidData.datos.pidKd = aTune.GetKd();
+  for( unsigned int i=0 ; i<sizeof(PIDDATA) ; i++  ) {
+    EEPROM.write( ADDR_PID_DATA+i , pidData.b[i] );
   }
+  EEPROM.write(ADDR_FIRM_VERSION, FIRM_VERSION);
+  myPID.SetTunings(pidData.datos.pidKp,pidData.datos.pidKi,pidData.datos.pidKd);
+
+  Serial.println("Autotunning terminado");
+  Serial.print(" Kp: "); Serial.print(pidData.datos.pidKp); Serial.print(" pidKi: "); Serial.print(pidData.datos.pidKi); Serial.print(" Kd: "); Serial.println(pidData.datos.pidKd);
+
+  resetFunc();  //reboot!!
 }
